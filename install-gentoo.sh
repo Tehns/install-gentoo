@@ -9,13 +9,13 @@ HOSTNAME=gentoo
 TIMEZONE=UTC
 ROOT_PASSWORD=gentoo
 
-echo "⚠️ ВСЕ ДАННЫЕ НА $DISK БУДУТ УДАЛЕНЫ!"
+echo "[WARNING] ВСЕ ДАННЫЕ НА $DISK БУДУТ УДАЛЕНЫ!"
 read -p "Продолжить? (yes): " ok
 [ "$ok" = "yes" ] || { echo "Отмена."; exit 1; }
 
 echo ">>> Проверка UEFI"
 if [ ! -d /sys/firmware/efi ]; then
-    echo "❌ UEFI не найдено, скрипт рассчитан на UEFI. Включи EFI и перезагрузи live-ISO."
+    echo "[ERROR] UEFI не найдено, скрипт рассчитан на UEFI. Включите EFI и перезагрузите live-ISO."
     exit 1
 fi
 
@@ -38,7 +38,7 @@ mount $ROOT_PART /mnt/gentoo
 mkdir -p /mnt/gentoo/boot/efi
 mount $EFI_PART /mnt/gentoo/boot/efi
 
-echo ">>> Stage3"
+echo ">>> Скачивание и распаковка Stage3"
 cd /mnt/gentoo
 STAGE3=$(curl -s https://www.gentoo.org/downloads/ | grep -o 'stage3-amd64-systemd-.*\.tar\.xz' | head -n1)
 wget https://distfiles.gentoo.org/releases/amd64/autobuilds/current-stage3-amd64-systemd/$STAGE3
@@ -53,7 +53,7 @@ MAKEOPTS="-j$(nproc)"
 USE="systemd"
 EOF
 
-echo ">>> DNS"
+echo ">>> Настройка DNS"
 cp --dereference /etc/resolv.conf /mnt/gentoo/etc/
 
 mount --types proc /proc /mnt/gentoo/proc
@@ -67,47 +67,47 @@ chroot /mnt/gentoo /bin/bash <<EOF
 source /etc/profile
 export PS1="(gentoo) \$PS1"
 
-echo ">>> Sync Portage"
+echo ">>> Синхронизация Portage"
 emerge --sync
 
 echo ">>> Профиль"
 eselect profile set default/linux/amd64/17.1/systemd
 
-echo ">>> Timezone"
+echo ">>> Настройка Timezone"
 echo "$TIMEZONE" > /etc/timezone
 emerge --config sys-libs/timezone-data
 
-echo ">>> Locale"
+echo ">>> Настройка Locale"
 echo "en_US.UTF-8 UTF-8" > /etc/locale.gen
 locale-gen
 eselect locale set en_US.utf8
 env-update && source /etc/profile
 
-echo ">>> Kernel"
+echo ">>> Установка Kernel"
 emerge sys-kernel/gentoo-kernel-bin
 
-echo ">>> Fstab"
+echo ">>> Настройка fstab"
 cat <<FSTAB > /etc/fstab
 $ROOT_PART  /          ext4  noatime  0 1
 $EFI_PART   /boot/efi  vfat  defaults 0 2
 $SWAP_PART  none       swap  sw       0 0
 FSTAB
 
-echo ">>> Network"
+echo ">>> Настройка сети"
 emerge net-misc/networkmanager
 systemctl enable NetworkManager
 
-echo ">>> Bootloader (UEFI)"
+echo ">>> Установка GRUB для UEFI"
 emerge sys-boot/grub:2
 grub-install --target=x86_64-efi --efi-directory=/boot/efi
 grub-mkconfig -o /boot/grub/grub.cfg
 
-echo ">>> Root password"
+echo ">>> Установка root пароля"
 echo "root:$ROOT_PASSWORD" | chpasswd
 
-echo ">>> Установка завершена"
+echo "[DONE] Установка завершена"
 EOF
 
-echo "✅ Установка завершена!"
+echo "[DONE] Установка завершена!"
 echo "Root пароль: $ROOT_PASSWORD"
 echo "Можно перезагружать систему."

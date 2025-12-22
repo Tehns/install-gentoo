@@ -8,13 +8,29 @@ ROOT=${DISK}3
 
 TIMEZONE=UTC
 ROOT_PASS=gentoo
+PROFILE=default/linux/amd64/17.1
 
 echo "[WARNING] ALL DATA ON $DISK WILL BE ERASED"
 read -p "Type yes to continue: " ok
 [ "$ok" = "yes" ] || exit 1
 
+echo "Enter username:"
+read USERNAME
+
+echo "Enter password for user $USERNAME:"
+read -s USER_PASS
+echo
+echo "Confirm password:"
+read -s USER_PASS2
+echo
+
+if [ "$USER_PASS" != "$USER_PASS2" ]; then
+    echo "Passwords do not match"
+    exit 1
+fi
+
 echo "Checking UEFI"
-[ -d /sys/firmware/efi ] || { echo "UEFI not found"; exit 1; }
+[ -d /sys/firmware/efi ] || { echo "UEFI not detected"; exit 1; }
 
 echo "Partitioning disk"
 wipefs -a $DISK
@@ -24,21 +40,28 @@ parted -s $DISK set 1 esp on
 parted -s $DISK mkpart primary linux-swap 1025MiB 5121MiB
 parted -s $DISK mkpart primary ext4 5121MiB 100%
 
-echo "Formatting"
+echo "Formatting partitions"
 mkfs.fat -F32 $EFI
 mkswap $SWAP
 swapon $SWAP
 mkfs.ext4 $ROOT
 
-echo "Mounting"
+echo "Mounting partitions"
 mount $ROOT /mnt/gentoo
 mkdir -p /mnt/gentoo/boot/efi
 mount $EFI /mnt/gentoo/boot/efi
 
 echo "Downloading stage3"
 cd /mnt/gentoo
-wget https://distfiles.gentoo.org/releases/amd64/autobuilds/current-stage3-amd64-openrc/stage3-amd64-openrc.tar.xz
-tar xpvf stage3-amd64-openrc.tar.xz --xattrs-include='*.*' --numeric-owner
+
+STAGE3_BASE=https://distfiles.gentoo.org/releases/amd64/autobuilds/current-stage3-amd64-openrc
+wget ${STAGE3_BASE}/latest-stage3-amd64-openrc.txt
+STAGE3_PATH=$(grep -v '^#' latest-stage3-amd64-openrc.txt | head -n 1)
+STAGE3_FILE=$(basename $STAGE3_PATH)
+wget ${STAGE3_BASE}/${STAGE3_PATH}
+
+echo "Extracting stage3"
+tar xpvf ${STAGE3_FILE} --xattrs-include='*.*' --numeric-owner
 
 echo "Configuring make.conf"
 cat <<EOF >> /mnt/gentoo/etc/portage/make.conf
@@ -56,28 +79,28 @@ mount --make-rslave /mnt/gentoo/sys
 mount --rbind /dev /mnt/gentoo/dev
 mount --make-rslave /mnt/gentoo/dev
 
+echo "Entering chroot"
 chroot /mnt/gentoo /bin/bash <<EOF
 source /etc/profile
 
-echo "Syncing portage"
 emerge --sync
+eselect profile set ${PROFILE}
 
-eselect profile set default/linux/amd64/17.1
-
-echo "$TIMEZONE" > /etc/timezone
+echo "${TIMEZONE}" > /etc/timezone
 emerge --config sys-libs/timezone-data
 
 echo "en_US.UTF-8 UTF-8" > /etc/locale.gen
 locale-gen
 eselect locale set en_US.utf8
-env-update && source /etc/profile
+env-update
+source /etc/profile
 
 emerge sys-kernel/gentoo-kernel-bin
 
 cat <<FSTAB > /etc/fstab
-$ROOT  /          ext4  noatime  0 1
-$EFI   /boot/efi  vfat  defaults 0 2
-$SWAP  none       swap  sw       0 0
+${ROOT}  /          ext4  noatime  0 1
+${EFI}   /boot/efi  vfat  defaults 0 2
+${SWAP}  none       swap  sw       0 0
 FSTAB
 
 emerge net-misc/dhcpcd
@@ -87,9 +110,16 @@ emerge sys-boot/grub:2
 grub-install --target=x86_64-efi --efi-directory=/boot/efi
 grub-mkconfig -o /boot/grub/grub.cfg
 
-echo "root:$ROOT_PASS" | chpasswd
+emerge app-admin/sudo
 
-echo "INSTALL DONE"
+echo "root:${ROOT_PASS}" | chpasswd
+
+useradd -m -G wheel,audio,video ${USERNAME}
+echo "${USERNAME}:${USER_PASS}" | chpasswd
+
+sed -i 's/^# %wheel ALL=(ALL) ALL/%wheel ALL=(ALL) ALL/' /etc/sudoers
+
+echo "INSTALL COMPLETE"
 EOF
 
-echo "DONE - reboot system"
+echo "DONE. You can reboot now."

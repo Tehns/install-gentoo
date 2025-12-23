@@ -1,11 +1,13 @@
 #!/bin/bash
 set -e
 
+# Disk configuration
 DISK=/dev/sda
 EFI=${DISK}1
 SWAP=${DISK}2
 ROOT=${DISK}3
 
+# System settings
 TIMEZONE=UTC
 ROOT_PASS=gentoo
 PROFILE=default/linux/amd64/17.1
@@ -30,7 +32,10 @@ if [ "$USER_PASS" != "$USER_PASS2" ]; then
 fi
 
 echo "Checking UEFI"
-[ -d /sys/firmware/efi ] || { echo "UEFI not detected"; exit 1; }
+if [ ! -d /sys/firmware/efi ]; then
+    echo "UEFI not detected"
+    exit 1
+fi
 
 echo "Partitioning disk"
 wipefs -a $DISK
@@ -55,9 +60,12 @@ echo "Downloading stage3"
 cd /mnt/gentoo
 
 STAGE3_BASE=https://distfiles.gentoo.org/releases/amd64/autobuilds/current-stage3-amd64-openrc
+
 wget ${STAGE3_BASE}/latest-stage3-amd64-openrc.txt
-STAGE3_PATH=$(grep -v '^#' latest-stage3-amd64-openrc.txt | head -n 1)
-STAGE3_FILE=$(basename $STAGE3_PATH)
+
+STAGE3_PATH=$(grep '\.tar\.xz$' latest-stage3-amd64-openrc.txt | head -n 1)
+STAGE3_FILE=$(basename "$STAGE3_PATH")
+
 wget ${STAGE3_BASE}/${STAGE3_PATH}
 
 echo "Extracting stage3"
@@ -71,6 +79,7 @@ CXXFLAGS="\${COMMON_FLAGS}"
 MAKEOPTS="-j$(nproc)"
 EOF
 
+echo "Configuring DNS"
 cp /etc/resolv.conf /mnt/gentoo/etc/
 
 mount --types proc /proc /mnt/gentoo/proc
@@ -83,37 +92,47 @@ echo "Entering chroot"
 chroot /mnt/gentoo /bin/bash <<EOF
 source /etc/profile
 
+echo "Syncing Portage"
 emerge --sync
+
+echo "Selecting profile"
 eselect profile set ${PROFILE}
 
+echo "Configuring timezone"
 echo "${TIMEZONE}" > /etc/timezone
 emerge --config sys-libs/timezone-data
 
+echo "Configuring locale"
 echo "en_US.UTF-8 UTF-8" > /etc/locale.gen
 locale-gen
 eselect locale set en_US.utf8
 env-update
 source /etc/profile
 
+echo "Installing kernel"
 emerge sys-kernel/gentoo-kernel-bin
 
+echo "Writing fstab"
 cat <<FSTAB > /etc/fstab
 ${ROOT}  /          ext4  noatime  0 1
 ${EFI}   /boot/efi  vfat  defaults 0 2
 ${SWAP}  none       swap  sw       0 0
 FSTAB
 
+echo "Installing network"
 emerge net-misc/dhcpcd
 rc-update add dhcpcd default
 
+echo "Installing sudo"
+emerge app-admin/sudo
+
+echo "Installing GRUB"
 emerge sys-boot/grub:2
 grub-install --target=x86_64-efi --efi-directory=/boot/efi
 grub-mkconfig -o /boot/grub/grub.cfg
 
-emerge app-admin/sudo
-
+echo "Setting passwords"
 echo "root:${ROOT_PASS}" | chpasswd
-
 useradd -m -G wheel,audio,video ${USERNAME}
 echo "${USERNAME}:${USER_PASS}" | chpasswd
 
@@ -122,4 +141,4 @@ sed -i 's/^# %wheel ALL=(ALL) ALL/%wheel ALL=(ALL) ALL/' /etc/sudoers
 echo "INSTALL COMPLETE"
 EOF
 
-echo "DONE. You can reboot now."
+echo "DONE. Reboot system."
